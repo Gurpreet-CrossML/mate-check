@@ -13,7 +13,13 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "mate-check uses the microphone so you can talk to the avatar.",
+        "NSSpeechRecognitionUsageDescription": "mate-check uses speech recognition to turn your voice into a question.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.anonymous.matecheck"
     },
     "android": {
       "adaptiveIcon": {
@@ -21,10 +27,32 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.anonymous.matecheck"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-video",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "mate-check uses the microphone so you can talk to the avatar.",
+          "speechRecognitionPermission": "mate-check uses speech recognition to turn your voice into a question.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "43bb39a1-3202-43e7-be6a-e3a6e6f707fc"
+      }
     }
   }
 }
