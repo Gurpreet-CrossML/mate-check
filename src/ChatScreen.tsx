@@ -17,7 +17,8 @@ import { AvatarVideo } from "./AvatarVideo";
 import { fetchChatReply, fetchClipVideoUrl, type ChatMessage } from "./api";
 import { useSpeechToText } from "./useSpeechToText";
 
-const GREETING = "G'day mate! I'm here to help. Ask me anything to get started.";
+const GREETING =
+  "Hi mate, this is MateCheck. Think of me as a mate in your pocket that helps you stay in touch with the people that care about you.";
 
 type Stage = "idle" | "greeting" | "thinking" | "rendering" | "ready" | "error";
 
@@ -194,29 +195,15 @@ export function ChatScreen() {
 
         <FlatList
           ref={listRef}
-          data={history}
+          data={history.filter((m) => m.role === "user")}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 8 }}
           renderItem={({ item }) => (
-            <View
-              className={`mb-2 max-w-[85%] rounded-2xl px-3 py-2 ${
-                item.role === "user"
-                  ? "self-end bg-brand"
-                  : "self-start bg-bubble"
-              }`}
-            >
-              <Text
-                className={`text-[11px] font-bold uppercase tracking-wider ${
-                  item.role === "user" ? "text-bg/70" : "text-muted"
-                }`}
-              >
-                {item.role === "user" ? "You" : "MateCheck"}
+            <View className="mb-2 max-w-[85%] self-end rounded-2xl bg-brand px-3 py-2">
+              <Text className="text-[11px] font-bold uppercase tracking-wider text-bg/70">
+                You
               </Text>
-              <Text
-                className={`mt-0.5 text-[15px] leading-5 ${
-                  item.role === "user" ? "text-bg" : "text-text"
-                }`}
-              >
+              <Text className="mt-0.5 text-[15px] leading-5 text-bg">
                 {item.content}
               </Text>
             </View>
