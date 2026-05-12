@@ -17,11 +17,11 @@ export function AvatarVideo({ videoUrl }: Props) {
   if (!videoUrl) return null;
 
   return (
-    <View className="h-full w-full overflow-hidden rounded-2xl bg-black">
+    <View className="h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-surface">
       <VideoView
         player={player}
         style={{ width: "100%", height: "100%" }}
-        contentFit="cover"
+        contentFit="contain"
         nativeControls={false}
       />
     </View>
