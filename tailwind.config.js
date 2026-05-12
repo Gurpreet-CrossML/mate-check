@@ -5,10 +5,19 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        bg: "#0B0B12",
-        surface: "#15151F",
-        accent: "#A78BFA",
-        muted: "#6B7280",
+        // MateCheck palette (sampled from brand art)
+        bg: "#0E1A14",          // deep forest, the outdoor backdrop dimmed
+        surface: "#16241C",     // slightly lighter card surface
+        surfaceAlt: "#1E2F26",  // input rows, secondary cards
+        brand: "#F5C518",       // MateCheck yellow (logo/script)
+        accent: "#F5C518",      // primary CTAs
+        secondary: "#2A66E0",   // MateCheck blue (shorts)
+        text: "#F5F1E6",        // warm off-white
+        muted: "#90A097",       // subdued sage gray
+        bubble: "#243A2E",      // assistant bubble
+      },
+      fontFamily: {
+        brand: ["System"],
       },
     },
   },

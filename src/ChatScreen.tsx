@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   View,
@@ -16,25 +17,42 @@ import { AvatarVideo } from "./AvatarVideo";
 import { fetchChatReply, fetchClipVideoUrl, type ChatMessage } from "./api";
 import { useSpeechToText } from "./useSpeechToText";
 
-type Stage = "idle" | "thinking" | "rendering" | "ready" | "error";
+const GREETING = "G'day mate! I'm here to help. Ask me anything to get started.";
+
+type Stage = "idle" | "greeting" | "thinking" | "rendering" | "ready" | "error";
 
 const STAGE_LABEL: Record<Stage, string> = {
-  idle: "Ready when you are.",
+  idle: "Ready",
+  greeting: "Saying hi…",
   thinking: "Thinking…",
-  rendering: "Rendering avatar…",
-  ready: "",
-  error: "Something went wrong.",
+  rendering: "Rendering…",
+  ready: "Ready",
+  error: "Error",
 };
+
+type Bubble = ChatMessage & { id: string };
+
+function uid() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export function ChatScreen() {
   const [input, setInput] = useState("");
-  const [history, setHistory] = useState<ChatMessage[]>([]);
-  const [reply, setReply] = useState<string | null>(null);
+  const [history, setHistory] = useState<Bubble[]>([]);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
 
+  const listRef = useRef<FlatList<Bubble>>(null);
   const speech = useSpeechToText();
+  const greetedRef = useRef(false);
+
+  useEffect(() => {
+    if (greetedRef.current) return;
+    greetedRef.current = true;
+    void runGreeting();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (speech.transcript) setInput(speech.transcript);
@@ -44,7 +62,35 @@ export function ChatScreen() {
     if (speech.error) setError(speech.error);
   }, [speech.error]);
 
-  const isBusy = stage === "thinking" || stage === "rendering";
+  useEffect(() => {
+    if (history.length > 0) {
+      requestAnimationFrame(() =>
+        listRef.current?.scrollToEnd({ animated: true })
+      );
+    }
+  }, [history.length]);
+
+  async function runGreeting() {
+    setStage("greeting");
+    setHistory([{ id: uid(), role: "assistant", content: GREETING }]);
+    try {
+      const url = await fetchClipVideoUrl(
+        GREETING,
+        ({ attempt, status }) => {
+          if (__DEV__) console.log(`[greeting] poll #${attempt} status=${status}`);
+        },
+        { intervalMs: 1000 }
+      );
+      setVideoUrl(url);
+      setStage("ready");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load greeting");
+      setStage("error");
+    }
+  }
+
+  const isBusy =
+    stage === "thinking" || stage === "rendering" || stage === "greeting";
   const canSend = !isBusy && input.trim().length > 0;
 
   async function handleSend() {
@@ -52,24 +98,35 @@ export function ChatScreen() {
     if (!userMessage) return;
 
     setError(null);
-    setVideoUrl(null);
-    setReply(null);
     setInput("");
+
+    const userBubble: Bubble = { id: uid(), role: "user", content: userMessage };
+    setHistory((h) => [...h, userBubble]);
     setStage("thinking");
 
     try {
-      const assistantReply = await fetchChatReply(userMessage, history);
-      setReply(assistantReply);
-      setHistory((h) => [
-        ...h,
-        { role: "user", content: userMessage },
-        { role: "assistant", content: assistantReply },
-      ]);
+      const contextHistory: ChatMessage[] = history.map(({ role, content }) => ({
+        role,
+        content,
+      }));
+      const assistantReply = await fetchChatReply(userMessage, contextHistory);
+
+      const assistantBubble: Bubble = {
+        id: uid(),
+        role: "assistant",
+        content: assistantReply,
+      };
+      setHistory((h) => [...h, assistantBubble]);
 
       setStage("rendering");
-      const url = await fetchClipVideoUrl(assistantReply, ({ attempt, status }) => {
-        if (__DEV__) console.log(`[clip] poll #${attempt} status=${status}`);
-      });
+      setVideoUrl(null);
+      const url = await fetchClipVideoUrl(
+        assistantReply,
+        ({ attempt, status }) => {
+          if (__DEV__) console.log(`[clip] poll #${attempt} status=${status}`);
+        },
+        { intervalMs: 1000 }
+      );
       setVideoUrl(url);
       setStage("ready");
     } catch (e) {
@@ -91,75 +148,107 @@ export function ChatScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <View className="flex-row items-center justify-between px-5 pt-2 pb-3">
-          <View>
-            <Text className="text-2xl font-bold text-white">mate-check</Text>
-            <Text className="text-xs text-muted">talking avatar · POC</Text>
+          <View className="flex-row items-center gap-2">
+            <View className="h-9 w-9 items-center justify-center rounded-xl bg-brand">
+              <Text className="text-base font-extrabold text-bg">👍</Text>
+            </View>
+            <View>
+              <Text className="text-2xl font-extrabold text-brand">
+                MateCheck
+              </Text>
+              <Text className="text-[11px] text-muted">your mate, on call</Text>
+            </View>
           </View>
-          <View className="rounded-full bg-surface px-3 py-1">
-            <Text className="text-[11px] text-accent">
-              {STAGE_LABEL[stage] || "Ready"}
+          <View className="rounded-full bg-surfaceAlt px-3 py-1">
+            <Text className="text-[11px] font-semibold text-brand">
+              {STAGE_LABEL[stage]}
             </Text>
           </View>
         </View>
 
-        <View className="mx-5 mb-3 aspect-square overflow-hidden rounded-3xl bg-surface">
+        <View className="mx-5 mb-3 aspect-square overflow-hidden rounded-3xl border border-brand/20 bg-surface">
           {videoUrl ? (
             <AvatarVideo videoUrl={videoUrl} />
           ) : (
             <View className="flex-1 items-center justify-center">
+              <Image
+                source={require("../assets/mascot.png")}
+                resizeMode="contain"
+                style={{ width: "80%", height: "80%", opacity: isBusy ? 0.5 : 1 }}
+              />
               {isBusy ? (
-                <View className="items-center gap-3">
-                  <ActivityIndicator size="large" color="#A78BFA" />
-                  <Text className="text-sm text-muted">
-                    {STAGE_LABEL[stage]}
+                <View className="absolute inset-0 items-center justify-center gap-2">
+                  <ActivityIndicator size="large" color="#F5C518" />
+                  <Text className="text-sm font-medium text-brand">
+                    {stage === "greeting"
+                      ? "Saying hello…"
+                      : stage === "thinking"
+                      ? "Thinking…"
+                      : "Rendering avatar (≈10–20s)…"}
                   </Text>
                 </View>
-              ) : (
-                <Text className="px-6 text-center text-base text-muted">
-                  Ask anything. The avatar will reply in a short clip.
-                </Text>
-              )}
+              ) : null}
             </View>
           )}
         </View>
 
-        <ScrollView
-          className="mx-5 mb-3"
-          contentContainerStyle={{ paddingBottom: 8 }}
-        >
-          {reply ? (
-            <View className="rounded-2xl bg-surface p-4">
-              <Text className="mb-1 text-[11px] uppercase tracking-wider text-muted">
-                Avatar
+        <FlatList
+          ref={listRef}
+          data={history}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 8 }}
+          renderItem={({ item }) => (
+            <View
+              className={`mb-2 max-w-[85%] rounded-2xl px-3 py-2 ${
+                item.role === "user"
+                  ? "self-end bg-brand"
+                  : "self-start bg-bubble"
+              }`}
+            >
+              <Text
+                className={`text-[11px] font-bold uppercase tracking-wider ${
+                  item.role === "user" ? "text-bg/70" : "text-muted"
+                }`}
+              >
+                {item.role === "user" ? "You" : "MateCheck"}
               </Text>
-              <Text className="text-[15px] leading-5 text-white">{reply}</Text>
+              <Text
+                className={`mt-0.5 text-[15px] leading-5 ${
+                  item.role === "user" ? "text-bg" : "text-text"
+                }`}
+              >
+                {item.content}
+              </Text>
             </View>
-          ) : null}
-          {error ? (
-            <View className="mt-2 rounded-2xl bg-red-500/10 p-3">
-              <Text className="text-sm text-red-300">{error}</Text>
-            </View>
-          ) : null}
-        </ScrollView>
+          )}
+          ListFooterComponent={
+            error ? (
+              <View className="mt-2 rounded-2xl bg-red-500/10 p-3">
+                <Text className="text-sm text-red-300">{error}</Text>
+              </View>
+            ) : null
+          }
+          className="mx-0 mb-3 flex-1"
+        />
 
         <View className="flex-row items-end gap-2 px-5 pb-5">
-          <View className="flex-1 flex-row items-center rounded-2xl bg-surface px-3">
+          <View className="flex-1 flex-row items-center rounded-2xl bg-surfaceAlt px-3">
             <TextInput
               value={input}
               onChangeText={setInput}
               placeholder={
-                speech.isListening ? "Listening…" : "Ask the avatar…"
+                speech.isListening ? "Listening…" : "Ask your mate…"
               }
-              placeholderTextColor="#6B7280"
+              placeholderTextColor="#90A097"
               multiline
               editable={!isBusy}
-              className="min-h-[44px] flex-1 py-3 text-base text-white"
+              className="min-h-[44px] flex-1 py-3 text-base text-text"
             />
             <Pressable
               onPress={toggleMic}
               disabled={isBusy}
               className={`ml-2 h-10 w-10 items-center justify-center rounded-full ${
-                speech.isListening ? "bg-red-500" : "bg-accent/20"
+                speech.isListening ? "bg-red-500" : "bg-brand/20"
               }`}
             >
               <Text className="text-lg">{speech.isListening ? "■" : "🎙"}</Text>
@@ -170,14 +259,14 @@ export function ChatScreen() {
             onPress={handleSend}
             disabled={!canSend}
             className={`h-12 items-center justify-center rounded-2xl px-5 ${
-              canSend ? "bg-accent" : "bg-surface"
+              canSend ? "bg-brand" : "bg-surfaceAlt"
             }`}
           >
             {isBusy ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color="#0E1A14" />
             ) : (
               <Text
-                className={`text-base font-semibold ${
+                className={`text-base font-bold ${
                   canSend ? "text-bg" : "text-muted"
                 }`}
               >
