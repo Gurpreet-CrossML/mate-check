@@ -22,7 +22,6 @@ export function AvatarVideo({ videoUrl }: Props) {
         player={player}
         style={{ width: "100%", height: "100%" }}
         contentFit="cover"
-        allowsFullscreen
         nativeControls={false}
       />
     </View>

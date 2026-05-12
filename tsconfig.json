@@ -3,13 +3,13 @@
   "compilerOptions": {
     "strict": true,
     "jsxImportSource": "nativewind",
-    "types": ["nativewind/types"]
+    "types": [
+      "nativewind/types"
+    ]
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    "nativewind-env.d.ts",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "nativewind-env.d.ts"
   ]
 }

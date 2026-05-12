@@ -67,7 +67,9 @@ export function ChatScreen() {
       ]);
 
       setStage("rendering");
-      const url = await fetchClipVideoUrl(assistantReply);
+      const url = await fetchClipVideoUrl(assistantReply, ({ attempt, status }) => {
+        if (__DEV__) console.log(`[clip] poll #${attempt} status=${status}`);
+      });
       setVideoUrl(url);
       setStage("ready");
     } catch (e) {
