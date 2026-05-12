@@ -13,21 +13,21 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
-import { AvatarVideo } from "./AvatarVideo";
-import { fetchChatReply, fetchClipVideoUrl, type ChatMessage } from "./api";
+import { StreamAvatar } from "./StreamAvatar";
+import { fetchChatReply, type ChatMessage } from "./api";
+import { useDidStream } from "./useDidStream";
 import { useSpeechToText } from "./useSpeechToText";
 
 const GREETING =
   "Hi mate, this is MateCheck. Think of me as a mate in your pocket that helps you stay in touch with the people that care about you.";
 
-type Stage = "idle" | "greeting" | "thinking" | "rendering" | "ready" | "error";
+type Stage = "starting" | "ready" | "thinking" | "speaking" | "error";
 
 const STAGE_LABEL: Record<Stage, string> = {
-  idle: "Ready",
-  greeting: "Saying hi…",
-  thinking: "Thinking…",
-  rendering: "Rendering…",
+  starting: "Waking up…",
   ready: "Ready",
+  thinking: "Thinking…",
+  speaking: "Talking…",
   error: "Error",
 };
 
@@ -40,20 +40,38 @@ function uid() {
 export function ChatScreen() {
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<Bubble[]>([]);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [stage, setStage] = useState<Stage>("idle");
+  const [stage, setStage] = useState<Stage>("starting");
   const [error, setError] = useState<string | null>(null);
 
   const listRef = useRef<FlatList<Bubble>>(null);
   const speech = useSpeechToText();
+  const stream = useDidStream();
   const greetedRef = useRef(false);
 
   useEffect(() => {
-    if (greetedRef.current) return;
-    greetedRef.current = true;
-    void runGreeting();
+    void stream.connect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Greet once the WebRTC stream is ready.
+  useEffect(() => {
+    if (stream.status === "connected" && !greetedRef.current) {
+      greetedRef.current = true;
+      setHistory([{ id: uid(), role: "assistant", content: GREETING }]);
+      setStage("speaking");
+      stream
+        .speak(GREETING)
+        .then(() => setStage("ready"))
+        .catch((e) => {
+          setError(e instanceof Error ? e.message : "Greeting failed");
+          setStage("error");
+        });
+    }
+    if (stream.status === "error" && stream.error) {
+      setError(stream.error);
+      setStage("error");
+    }
+  }, [stream.status, stream.error, stream.speak]);
 
   useEffect(() => {
     if (speech.transcript) setInput(speech.transcript);
@@ -64,35 +82,18 @@ export function ChatScreen() {
   }, [speech.error]);
 
   useEffect(() => {
-    if (history.length > 0) {
+    const userMessages = history.filter((m) => m.role === "user");
+    if (userMessages.length > 0) {
       requestAnimationFrame(() =>
         listRef.current?.scrollToEnd({ animated: true })
       );
     }
   }, [history.length]);
 
-  async function runGreeting() {
-    setStage("greeting");
-    setHistory([{ id: uid(), role: "assistant", content: GREETING }]);
-    try {
-      const url = await fetchClipVideoUrl(
-        GREETING,
-        ({ attempt, status }) => {
-          if (__DEV__) console.log(`[greeting] poll #${attempt} status=${status}`);
-        },
-        { intervalMs: 1000 }
-      );
-      setVideoUrl(url);
-      setStage("ready");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load greeting");
-      setStage("error");
-    }
-  }
-
   const isBusy =
-    stage === "thinking" || stage === "rendering" || stage === "greeting";
-  const canSend = !isBusy && input.trim().length > 0;
+    stage === "starting" || stage === "thinking" || stage === "speaking";
+  const canSend =
+    !isBusy && input.trim().length > 0 && stream.status === "connected";
 
   async function handleSend() {
     const userMessage = input.trim();
@@ -112,23 +113,13 @@ export function ChatScreen() {
       }));
       const assistantReply = await fetchChatReply(userMessage, contextHistory);
 
-      const assistantBubble: Bubble = {
-        id: uid(),
-        role: "assistant",
-        content: assistantReply,
-      };
-      setHistory((h) => [...h, assistantBubble]);
+      setHistory((h) => [
+        ...h,
+        { id: uid(), role: "assistant", content: assistantReply },
+      ]);
 
-      setStage("rendering");
-      setVideoUrl(null);
-      const url = await fetchClipVideoUrl(
-        assistantReply,
-        ({ attempt, status }) => {
-          if (__DEV__) console.log(`[clip] poll #${attempt} status=${status}`);
-        },
-        { intervalMs: 1000 }
-      );
-      setVideoUrl(url);
+      setStage("speaking");
+      await stream.speak(assistantReply);
       setStage("ready");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
@@ -168,27 +159,21 @@ export function ChatScreen() {
         </View>
 
         <View className="mx-5 mb-3 aspect-square overflow-hidden rounded-3xl border border-brand/20 bg-surface">
-          {videoUrl ? (
-            <AvatarVideo videoUrl={videoUrl} />
+          {stream.remoteStream ? (
+            <StreamAvatar stream={stream.remoteStream} />
           ) : (
             <View className="flex-1 items-center justify-center">
               <Image
                 source={require("../assets/mascot.png")}
                 resizeMode="contain"
-                style={{ width: "80%", height: "80%", opacity: isBusy ? 0.5 : 1 }}
+                style={{ width: "80%", height: "80%", opacity: 0.5 }}
               />
-              {isBusy ? (
-                <View className="absolute inset-0 items-center justify-center gap-2">
-                  <ActivityIndicator size="large" color="#F5C518" />
-                  <Text className="text-sm font-medium text-brand">
-                    {stage === "greeting"
-                      ? "Saying hello…"
-                      : stage === "thinking"
-                      ? "Thinking…"
-                      : "Rendering avatar (≈10–20s)…"}
-                  </Text>
-                </View>
-              ) : null}
+              <View className="absolute inset-0 items-center justify-center gap-2">
+                <ActivityIndicator size="large" color="#F5C518" />
+                <Text className="text-sm font-medium text-brand">
+                  {STAGE_LABEL[stage]}
+                </Text>
+              </View>
             </View>
           )}
         </View>
