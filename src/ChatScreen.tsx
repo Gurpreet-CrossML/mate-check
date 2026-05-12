@@ -176,6 +176,22 @@ export function ChatScreen() {
               </View>
             </View>
           )}
+          {/* visible debug overlay — shows last step + ICE state so we can see crashes mid-handshake */}
+          {__DEV__ ? (
+            <View className="absolute left-2 right-2 top-2 rounded-lg bg-black/60 p-2">
+              <Text className="text-[10px] font-mono text-brand">
+                step: {stream.debug.step}
+              </Text>
+              <Text className="text-[10px] font-mono text-text">
+                {stream.debug.message}
+              </Text>
+              {stream.debug.iceState ? (
+                <Text className="text-[10px] font-mono text-muted">
+                  ice: {stream.debug.iceState} · conn: {stream.debug.connState ?? "?"}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         <FlatList
