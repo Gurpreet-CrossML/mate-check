@@ -44,6 +44,7 @@ export function useDidStream() {
   }, []);
 
   const disconnect = useCallback(async () => {
+    console.log("[stream] disconnect() called");
     const id = streamIdRef.current;
     const session = sessionIdRef.current;
     streamIdRef.current = null;
@@ -68,12 +69,14 @@ export function useDidStream() {
     setStatus("connecting");
 
     try {
+      console.log("[stream] POST", `${API_BASE_URL}/api/streams`);
       const res = await fetch(`${API_BASE_URL}/api/streams`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
       const json = (await res.json()) as CreateResponse | { error: any };
+      console.log("[stream] create response status", res.status, "keys:", Object.keys(json));
       if (!res.ok || !("offer" in json)) {
         throw new Error(
           "error" in json
@@ -86,6 +89,7 @@ export function useDidStream() {
 
       streamIdRef.current = json.id;
       sessionIdRef.current = json.session_id;
+      console.log("[stream] id=", json.id, "session_id present:", !!json.session_id);
 
       const pc = new RTCPeerConnection({
         iceServers: json.ice_servers as any,
@@ -93,11 +97,13 @@ export function useDidStream() {
       pcRef.current = pc;
 
       // react-native-webrtc uses `on*` handler properties, not addEventListener.
+      // ontrack fires as soon as we setRemoteDescription with the offer — the
+      // media isn't flowing yet. Don't mark "connected" here; wait for ICE.
       (pc as any).ontrack = (event: any) => {
         const stream: MediaStream | undefined = event.streams?.[0];
         if (stream) {
+          console.log("[stream] ontrack received");
           setRemoteStream(stream);
-          setStatus("connected");
         }
       };
 
@@ -120,9 +126,21 @@ export function useDidStream() {
 
       (pc as any).onconnectionstatechange = () => {
         const state = (pc as any).connectionState as string | undefined;
+        console.log("[stream] connectionState=", state);
         if (state === "failed" || state === "disconnected") {
           setStatus("error");
           setError(`WebRTC ${state}`);
+        }
+      };
+      (pc as any).oniceconnectionstatechange = () => {
+        const ice = (pc as any).iceConnectionState as string | undefined;
+        console.log("[stream] iceConnectionState=", ice);
+        if (ice === "connected" || ice === "completed") {
+          setStatus("connected");
+        }
+        if (ice === "failed") {
+          setStatus("error");
+          setError("ICE negotiation failed");
         }
       };
 
@@ -132,6 +150,7 @@ export function useDidStream() {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
+      console.log("[stream] POST sdp answer");
       const sdpRes = await fetch(
         `${API_BASE_URL}/api/streams/${json.id}/sdp`,
         {
@@ -143,8 +162,13 @@ export function useDidStream() {
           }),
         }
       );
-      if (!sdpRes.ok) throw new Error(`sdp exchange failed (${sdpRes.status})`);
+      console.log("[stream] sdp response status", sdpRes.status);
+      if (!sdpRes.ok) {
+        const errText = await sdpRes.text();
+        throw new Error(`sdp exchange failed (${sdpRes.status}): ${errText}`);
+      }
     } catch (e) {
+      console.error("[stream] connect error:", e);
       setError(e instanceof Error ? e.message : "Stream connect failed");
       setStatus("error");
       cleanup();
