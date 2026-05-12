@@ -22,7 +22,7 @@ import {
 import { useSpeechToText } from "./useSpeechToText";
 
 const GREETING =
-  "Hi mate, this is MateCheck. Think of me as a mate in your pocket that helps you stay in touch with the people that care about you.";
+  "G'day mate, welcome to MateCheck! Think of me as your mate in your pocket — here to help you stay close to the people who care about you. Got something on your mind? Let's have a yarn.";
 
 type Stage = "idle" | "greeting" | "thinking" | "rendering" | "ready" | "error";
 
