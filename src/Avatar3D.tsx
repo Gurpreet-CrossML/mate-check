@@ -78,15 +78,25 @@ export function Avatar3D({
     const loader = new GLTFLoader();
     let avatar: THREE.Object3D | null = null;
     try {
+      console.log("[Avatar3D] fetching", avatarUrl);
       const res = await fetch(avatarUrl);
-      if (!res.ok) throw new Error(`avatar download failed ${res.status}`);
+      if (!res.ok) {
+        throw new Error(
+          `download ${res.status} ${res.statusText} from ${avatarUrl}`
+        );
+      }
       const buffer = await res.arrayBuffer();
+      console.log("[Avatar3D] downloaded", buffer.byteLength, "bytes; parsing");
       const gltf = await new Promise<any>((resolve, reject) => {
-        loader.parse(buffer, "", resolve, reject);
+        loader.parse(buffer, "", resolve, (err: any) => {
+          reject(new Error(`GLTF parse failed: ${err?.message ?? String(err)}`));
+        });
       });
       avatar = gltf.scene as THREE.Object3D;
+      console.log("[Avatar3D] avatar ready");
     } catch (err) {
-      console.warn("[Avatar3D] failed to load avatar:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[Avatar3D] failed to load avatar:", msg);
     }
 
     let mouthMeshes: THREE.Mesh[] = [];
