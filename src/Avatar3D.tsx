@@ -2,42 +2,50 @@ import { useRef } from "react";
 import { View } from "react-native";
 import { GLView, type ExpoWebGLRenderingContext } from "expo-gl";
 import { Renderer } from "expo-three";
+import { Asset } from "expo-asset";
 import * as THREE from "three";
 import { GLTFLoader } from "three-stdlib";
 
-// Default Ready Player Me avatar. Replace with any URL of the form
-// https://models.readyplayer.me/<id>.glb — including ?morphTargets=... for
-// the specific visemes you want pre-baked.
-const DEFAULT_AVATAR_URL =
-  "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb?morphTargets=ARKit,Oculus%20Visemes";
+// `require()` returns Metro's numeric asset id; expo-asset turns it into
+// a real local file path at runtime. Drop a replacement model.glb in
+// place and rebuild — no other code change needed.
+const DEFAULT_AVATAR: number = require("../assets/model.glb");
 
 type Props = {
-  /** Override the default Ready Player Me avatar. */
-  avatarUrl?: string;
+  /**
+   * Either a Metro asset id (the result of `require("./avatar.glb")`)
+   * or a remote URL. Defaults to the bundled `assets/model.glb`.
+   */
+  avatarSource?: number | string;
   /**
    * Ref whose `.current` is an amplitude in [0, 1]. Read on every frame
    * to drive the mouth blendshape. Owned by the parent so audio playback
    * and rendering can update independently.
    */
   amplitudeRef: React.MutableRefObject<number>;
-  /** Solid color behind the avatar; matches the screen's surface tone. */
   backgroundColor?: number;
 };
 
-const VISEMES = ["viseme_aa", "viseme_E", "viseme_O"] as const;
+// Mouth-open blendshapes from Apple's ARKit face-tracking set. jawOpen
+// is the primary driver; mouthFunnel adds a subtle lip-rounding at
+// higher amplitudes so the result doesn't look like a single
+// jaw-drop loop.
+const MOUTH_TARGETS: { name: string; weight: number }[] = [
+  { name: "jawOpen", weight: 0.9 },
+  { name: "mouthFunnel", weight: 0.25 },
+];
 const BLINK_KEYS = ["eyeBlinkLeft", "eyeBlinkRight"] as const;
 
 /**
- * Renders a Ready Player Me avatar with procedural idle motion and
- * audio-driven mouth movement. Runs entirely on the device GPU — no
- * server-side avatar inference.
+ * Renders a GLB avatar with procedural idle motion (head sway + blinks)
+ * and audio-driven mouth movement. Everything runs on the device GPU —
+ * no server-side avatar inference.
  */
 export function Avatar3D({
-  avatarUrl = DEFAULT_AVATAR_URL,
+  avatarSource = DEFAULT_AVATAR,
   amplitudeRef,
   backgroundColor = 0x121f18,
 }: Props) {
-  // Hold mutable scene refs across re-renders without re-triggering effects.
   const stateRef = useRef<{
     cancelled: boolean;
     blinkUntil: number;
@@ -60,11 +68,12 @@ export function Avatar3D({
     scene.background = new THREE.Color(backgroundColor);
 
     const camera = new THREE.PerspectiveCamera(28, width / height, 0.1, 100);
-    // Framed on the head/shoulders — RPM avatars are y-up, ~1.7m tall.
+    // Framed on the head/shoulders — most full-body avatars are y-up,
+    // ~1.7m tall. Adjust if your model is differently scaled.
     camera.position.set(0, 1.55, 1.05);
     camera.lookAt(0, 1.55, 0);
 
-    // Soft three-point-ish lighting. RPM PBR materials look dead without it.
+    // Soft three-point-ish lighting. PBR materials look dead without it.
     scene.add(new THREE.AmbientLight(0xffffff, 0.55));
     const key = new THREE.DirectionalLight(0xffffff, 0.9);
     key.position.set(1.2, 2, 1.5);
@@ -73,20 +82,11 @@ export function Avatar3D({
     fill.position.set(-1.5, 1.2, 1);
     scene.add(fill);
 
-    // Fetch the GLB ourselves — GLTFLoader.load() relies on URL fetching
-    // semantics that aren't reliable in RN; parse() on raw bytes is.
     const loader = new GLTFLoader();
     let avatar: THREE.Object3D | null = null;
     try {
-      console.log("[Avatar3D] fetching", avatarUrl);
-      const res = await fetch(avatarUrl);
-      if (!res.ok) {
-        throw new Error(
-          `download ${res.status} ${res.statusText} from ${avatarUrl}`
-        );
-      }
-      const buffer = await res.arrayBuffer();
-      console.log("[Avatar3D] downloaded", buffer.byteLength, "bytes; parsing");
+      const buffer = await loadAvatarBuffer(avatarSource);
+      console.log("[Avatar3D] loaded", buffer.byteLength, "bytes; parsing");
       const gltf = await new Promise<any>((resolve, reject) => {
         loader.parse(buffer, "", resolve, (err: any) => {
           reject(new Error(`GLTF parse failed: ${err?.message ?? String(err)}`));
@@ -99,7 +99,7 @@ export function Avatar3D({
       console.warn("[Avatar3D] failed to load avatar:", msg);
     }
 
-    let mouthMeshes: THREE.Mesh[] = [];
+    const mouthMeshes: THREE.Mesh[] = [];
     let headBone: THREE.Object3D | null = null;
     if (avatar) {
       scene.add(avatar);
@@ -120,34 +120,33 @@ export function Avatar3D({
       const t = clock.getElapsedTime();
       const delta = clock.getDelta();
 
-      // Procedural idle: subtle head sway so the avatar never freezes.
+      // Subtle head sway so the avatar never freezes.
       if (headBone) {
         headBone.rotation.y = Math.sin(t * 0.6) * 0.04;
         headBone.rotation.x = Math.sin(t * 0.4) * 0.02;
       }
 
-      // Mouth from amplitude — split across a couple of visemes so the
-      // result reads as generic talking instead of a single "ah" shape.
       const amp = clamp01(amplitudeRef.current ?? 0);
-      // Random blink scheduler.
       if (t >= stateRef.current.nextBlinkAt) {
         stateRef.current.blinkUntil = t + 0.12;
         stateRef.current.nextBlinkAt = t + 2.5 + Math.random() * 3.5;
       }
       const blink = t < stateRef.current.blinkUntil ? 1 : 0;
 
+      // Smoothing factor — clamped so we don't overshoot when frame
+      // rates dip.
+      const smooth = Math.min(1, delta * 18);
+
       for (const mesh of mouthMeshes) {
         const dict = (mesh as any).morphTargetDictionary as Record<string, number>;
         const influences = (mesh as any).morphTargetInfluences as number[];
         if (!dict || !influences) continue;
 
-        for (let i = 0; i < VISEMES.length; i++) {
-          const idx = dict[VISEMES[i]];
+        for (const target of MOUTH_TARGETS) {
+          const idx = dict[target.name];
           if (idx === undefined) continue;
-          // Weight aa heaviest, others lighter, so the mouth opens but
-          // doesn't lock into one vowel.
-          const weight = i === 0 ? amp : amp * (0.5 - i * 0.15);
-          influences[idx] = lerp(influences[idx] ?? 0, weight, Math.min(1, delta * 18));
+          const goal = amp * target.weight;
+          influences[idx] = lerp(influences[idx] ?? 0, goal, smooth);
         }
         for (const key of BLINK_KEYS) {
           const idx = dict[key];
@@ -165,16 +164,43 @@ export function Avatar3D({
 
   return (
     <View className="h-full w-full overflow-hidden rounded-3xl">
-      <GLView
-        style={{ flex: 1 }}
-        onContextCreate={onContextCreate}
-        // RN re-creates the GL context if the view remounts; mark this
-        // instance's state as cancelled so the previous animate() loop
-        // exits cleanly when that happens.
-        key="avatar3d-glview"
-      />
+      <GLView style={{ flex: 1 }} onContextCreate={onContextCreate} key="avatar3d-glview" />
     </View>
   );
+}
+
+async function loadAvatarBuffer(source: number | string): Promise<ArrayBuffer> {
+  if (typeof source === "string") {
+    console.log("[Avatar3D] fetching", source);
+    const res = await fetch(source);
+    if (!res.ok) {
+      throw new Error(`download ${res.status} ${res.statusText} from ${source}`);
+    }
+    const buf = await res.arrayBuffer();
+    sanityCheckGlb(buf, source);
+    return buf;
+  }
+
+  // Bundled asset path. expo-asset materializes it to disk on first use.
+  const asset = Asset.fromModule(source);
+  await asset.downloadAsync();
+  const uri = asset.localUri || asset.uri;
+  if (!uri) throw new Error("bundled asset has no uri after downloadAsync");
+  console.log("[Avatar3D] loading bundled asset from", uri);
+  const res = await fetch(uri);
+  const buf = await res.arrayBuffer();
+  sanityCheckGlb(buf, uri);
+  return buf;
+}
+
+function sanityCheckGlb(buffer: ArrayBuffer, where: string): void {
+  const head = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
+  if (head[0] === 0x3c /* '<' */) {
+    throw new Error(`Got HTML instead of a GLB — wrong URL? (${where})`);
+  }
+  if (head[0] !== 0x67 /* 'g' for "glTF" magic */) {
+    throw new Error(`Not a GLB (first bytes: ${Array.from(head).join(",")}, src=${where})`);
+  }
 }
 
 function clamp01(v: number): number {
