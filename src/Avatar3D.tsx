@@ -67,6 +67,10 @@ export function Avatar3D({
   async function onContextCreate(gl: ExpoWebGLRenderingContext) {
     const width = gl.drawingBufferWidth;
     const height = gl.drawingBufferHeight;
+    console.log("[Avatar3D] GL context", { width, height });
+    if (width === 0 || height === 0) {
+      console.warn("[Avatar3D] zero-sized GL surface — layout not ready");
+    }
 
     const renderer = new Renderer({ gl });
     renderer.setSize(width, height);
@@ -75,6 +79,19 @@ export function Avatar3D({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(bg);
+
+    if (debug) {
+      // Bright marker cube at origin — if rendering works at all, this
+      // is impossible to miss. If the cube is invisible too, the issue
+      // is the GLView itself (likely an iOS Simulator quirk; try a
+      // physical device).
+      const cube = new THREE.Mesh(
+        new THREE.BoxGeometry(0.4, 0.4, 0.4),
+        new THREE.MeshBasicMaterial({ color: 0xffff00 })
+      );
+      cube.position.set(0.6, 1.5, 0);
+      scene.add(cube);
+    }
 
     // Wider FOV so head + shoulders fit even when the model's max.y is
     // a tall hair/hat node. Far plane bumped to handle giant scenes.
@@ -201,6 +218,7 @@ export function Avatar3D({
 
     const clock = new THREE.Clock();
     stateRef.current.nextBlinkAt = clock.getElapsedTime() + 2.5 + Math.random() * 2;
+    let firstFrameLogged = false;
 
     const animate = () => {
       if (stateRef.current.cancelled) return;
@@ -244,6 +262,10 @@ export function Avatar3D({
 
       renderer.render(scene, camera);
       gl.endFrameEXP();
+      if (!firstFrameLogged) {
+        firstFrameLogged = true;
+        console.log("[Avatar3D] first frame rendered");
+      }
       requestAnimationFrame(animate);
     };
     animate();
