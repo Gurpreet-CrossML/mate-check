@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,25 +12,21 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
-import { AvatarVideo } from "./AvatarVideo";
-import {
-  fetchChatReply,
-  fetchClipVideoUrl,
-  type ChatMessage,
-} from "./api";
+import { Avatar3D } from "./Avatar3D";
+import { streamChatReply, type ChatMessage } from "./api";
+import { useAvatarSpeech } from "./useAvatarSpeech";
 import { useSpeechToText } from "./useSpeechToText";
 
 const GREETING =
   "G'day mate, welcome to MateCheck! Think of me as your mate in your pocket — here to help you stay close to the people who care about you. Got something on your mind? Let's have a yarn.";
 
-type Stage = "idle" | "greeting" | "thinking" | "rendering" | "ready" | "error";
+type Stage = "idle" | "greeting" | "thinking" | "speaking" | "error";
 
 const STAGE_LABEL: Record<Stage, string> = {
   idle: "Ready",
   greeting: "Saying hi…",
   thinking: "Thinking…",
-  rendering: "Rendering…",
-  ready: "Ready",
+  speaking: "Speaking…",
   error: "Error",
 };
 
@@ -44,12 +39,12 @@ function uid() {
 export function ChatScreen() {
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<Bubble[]>([]);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
 
   const listRef = useRef<FlatList<Bubble>>(null);
   const speech = useSpeechToText();
+  const voice = useAvatarSpeech();
   const greetedRef = useRef(false);
 
   useEffect(() => {
@@ -68,6 +63,10 @@ export function ChatScreen() {
   }, [speech.error]);
 
   useEffect(() => {
+    if (voice.error) setError(voice.error);
+  }, [voice.error]);
+
+  useEffect(() => {
     const userMessages = history.filter((m) => m.role === "user");
     if (userMessages.length > 0) {
       requestAnimationFrame(() =>
@@ -80,23 +79,15 @@ export function ChatScreen() {
     setStage("greeting");
     setHistory([{ id: uid(), role: "assistant", content: GREETING }]);
     try {
-      const url = await fetchClipVideoUrl(
-        GREETING,
-        ({ attempt, status }) => {
-          if (__DEV__) console.log(`[greeting] poll #${attempt} status=${status}`);
-        },
-        { intervalMs: 1000 }
-      );
-      setVideoUrl(url);
-      setStage("ready");
+      await voice.speak(GREETING);
+      setStage("idle");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load greeting");
+      setError(e instanceof Error ? e.message : "Failed greeting");
       setStage("error");
     }
   }
 
-  const isBusy =
-    stage === "thinking" || stage === "rendering" || stage === "greeting";
+  const isBusy = stage === "thinking" || stage === "speaking" || stage === "greeting";
   const canSend = !isBusy && input.trim().length > 0;
 
   async function handleSend() {
@@ -115,24 +106,16 @@ export function ChatScreen() {
         role,
         content,
       }));
-      const assistantReply = await fetchChatReply(userMessage, contextHistory);
+      const assistantReply = await streamChatReply(userMessage, contextHistory);
 
       setHistory((h) => [
         ...h,
         { id: uid(), role: "assistant", content: assistantReply },
       ]);
 
-      setStage("rendering");
-      setVideoUrl(null);
-      const url = await fetchClipVideoUrl(
-        assistantReply,
-        ({ attempt, status }) => {
-          if (__DEV__) console.log(`[clip] poll #${attempt} status=${status}`);
-        },
-        { intervalMs: 1000 }
-      );
-      setVideoUrl(url);
-      setStage("ready");
+      setStage("speaking");
+      await voice.speak(assistantReply);
+      setStage("idle");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
       setStage("error");
@@ -171,29 +154,13 @@ export function ChatScreen() {
         </View>
 
         <View className="mx-5 mb-3 aspect-square overflow-hidden rounded-3xl border border-brand/20 bg-surface">
-          {videoUrl ? (
-            <AvatarVideo videoUrl={videoUrl} />
-          ) : (
-            <View className="flex-1 items-center justify-center">
-              <Image
-                source={require("../assets/mascot.png")}
-                resizeMode="contain"
-                style={{ width: "80%", height: "80%", opacity: isBusy ? 0.5 : 1 }}
-              />
-              {isBusy ? (
-                <View className="absolute inset-0 items-center justify-center gap-2">
-                  <ActivityIndicator size="large" color="#F5C518" />
-                  <Text className="text-sm font-medium text-brand">
-                    {stage === "greeting"
-                      ? "Saying hello…"
-                      : stage === "thinking"
-                      ? "Thinking…"
-                      : "Rendering avatar (≈10–20s)…"}
-                  </Text>
-                </View>
-              ) : null}
+          <Avatar3D amplitudeRef={voice.amplitudeRef} />
+          {isBusy && stage === "thinking" ? (
+            <View className="absolute right-3 top-3 flex-row items-center gap-2 rounded-full bg-bg/70 px-3 py-1">
+              <ActivityIndicator size="small" color="#F5C518" />
+              <Text className="text-xs font-medium text-brand">Thinking…</Text>
             </View>
-          )}
+          ) : null}
         </View>
 
         <FlatList
@@ -226,9 +193,7 @@ export function ChatScreen() {
             <TextInput
               value={input}
               onChangeText={setInput}
-              placeholder={
-                speech.isListening ? "Listening…" : "Ask your mate…"
-              }
+              placeholder={speech.isListening ? "Listening…" : "Ask your mate…"}
               placeholderTextColor="#90A097"
               multiline
               editable={!isBusy}

@@ -17,7 +17,6 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "mate-check uses the microphone so you can talk to the avatar.",
         "NSSpeechRecognitionUsageDescription": "mate-check uses speech recognition to turn your voice into a question.",
-        "NSCameraUsageDescription": "mate-check streams the talking avatar over WebRTC.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.anonymous.matecheck"
@@ -38,7 +37,6 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-video",
       [
         "expo-speech-recognition",
         {
@@ -48,8 +46,7 @@
             "com.google.android.googlequicksearchbox"
           ]
         }
-      ],
-      "@config-plugins/react-native-webrtc"
+      ]
     ],
     "extra": {
       "eas": {

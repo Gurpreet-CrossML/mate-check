@@ -1,70 +1,115 @@
+import { fetch as expoFetch } from "expo/fetch";
 import { API_BASE_URL } from "./config";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
-export async function fetchChatReply(
-  message: string,
-  history: ChatMessage[] = []
-): Promise<string> {
-  const res = await fetch(`${API_BASE_URL}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? `chat failed (${res.status})`);
-  return data.reply as string;
-}
-
-type ClipStatus = {
-  id: string;
-  status: string;
-  videoUrl: string | null;
-  error: string | null;
+export type ChatStreamHandlers = {
+  onDelta?: (delta: string, full: string) => void;
+  onDone?: (full: string) => void;
 };
 
-async function startClip(text: string): Promise<string> {
-  const res = await fetch(`${API_BASE_URL}/api/clip`, {
+// Streams the assistant reply token-by-token over NDJSON. Resolves with the full text.
+export async function streamChatReply(
+  message: string,
+  history: ChatMessage[] = [],
+  handlers: ChatStreamHandlers = {}
+): Promise<string> {
+  const res = await expoFetch(`${API_BASE_URL}/api/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/x-ndjson",
+    },
+    body: JSON.stringify({ message, history }),
+  });
+
+  if (!res.ok) {
+    let errMsg = `chat failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.error) errMsg = data.error;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  if (!res.body) {
+    const text = await res.text();
+    return parseNdjsonString(text, handlers);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let full = "";
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line) continue;
+      full = applyEvent(line, full, handlers);
+    }
+  }
+
+  if (buffer.trim()) {
+    full = applyEvent(buffer.trim(), full, handlers);
+  }
+
+  handlers.onDone?.(full);
+  return full;
+}
+
+function applyEvent(line: string, full: string, handlers: ChatStreamHandlers): string {
+  let ev: { type?: string; content?: string; error?: string };
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return full;
+  }
+  if (ev.type === "delta" && typeof ev.content === "string") {
+    const next = full + ev.content;
+    handlers.onDelta?.(ev.content, next);
+    return next;
+  }
+  if (ev.type === "error") {
+    throw new Error(ev.error ?? "stream error");
+  }
+  return full;
+}
+
+function parseNdjsonString(text: string, handlers: ChatStreamHandlers): string {
+  let full = "";
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    full = applyEvent(line, full, handlers);
+  }
+  handlers.onDone?.(full);
+  return full;
+}
+
+export type TtsClip = {
+  audio: string; // base64 WAV
+  mime: string;
+  sampleRate: number;
+  durationMs: number;
+  envelope: number[]; // 0..1 amplitude per envelopeWindowMs slice
+  envelopeWindowMs: number;
+};
+
+export async function fetchTtsClip(text: string): Promise<TtsClip> {
+  const res = await fetch(`${API_BASE_URL}/api/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? `clip create failed (${res.status})`);
-  if (!data.id) throw new Error("No clip id returned");
-  return data.id as string;
-}
-
-async function getClipStatus(id: string): Promise<ClipStatus> {
-  const res = await fetch(`${API_BASE_URL}/api/clip/${encodeURIComponent(id)}`);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? `clip status failed (${res.status})`);
-  return data as ClipStatus;
-}
-
-export type ClipProgress = (info: { attempt: number; status: string }) => void;
-
-export async function fetchClipVideoUrl(
-  text: string,
-  onProgress?: ClipProgress,
-  opts: { intervalMs?: number; timeoutMs?: number } = {}
-): Promise<string> {
-  const intervalMs = opts.intervalMs ?? 2000;
-  const timeoutMs = opts.timeoutMs ?? 180_000;
-
-  const id = await startClip(text);
-  const started = Date.now();
-  let attempt = 0;
-
-  while (Date.now() - started < timeoutMs) {
-    attempt += 1;
-    const s = await getClipStatus(id);
-    onProgress?.({ attempt, status: s.status });
-    if (s.status === "done" && s.videoUrl) return s.videoUrl;
-    if (s.status === "error" || s.status === "rejected") {
-      throw new Error(s.error ?? `clip ${s.status}`);
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  throw new Error("Clip generation timed out (>3 min)");
+  if (!res.ok) throw new Error(data?.error ?? `tts failed (${res.status})`);
+  return data as TtsClip;
 }
