@@ -26,6 +26,11 @@ type Props = {
    */
   amplitudeRef: React.MutableRefObject<number>;
   backgroundColor?: number;
+  /**
+   * Render a bright background + XYZ axes helper for diagnosing
+   * "avatar not visible" issues. Off by default in production builds.
+   */
+  debug?: boolean;
 };
 
 // Mouth-open blendshapes from Apple's ARKit face-tracking set. jawOpen
@@ -47,6 +52,7 @@ export function Avatar3D({
   avatarSource = DEFAULT_AVATAR,
   amplitudeRef,
   backgroundColor = 0x121f18,
+  debug = false,
 }: Props) {
   const stateRef = useRef<{
     cancelled: boolean;
@@ -64,24 +70,31 @@ export function Avatar3D({
 
     const renderer = new Renderer({ gl });
     renderer.setSize(width, height);
-    renderer.setClearColor(backgroundColor, 1);
+    const bg = debug ? 0xb33333 : backgroundColor;
+    renderer.setClearColor(bg, 1);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(backgroundColor);
+    scene.background = new THREE.Color(bg);
 
-    const camera = new THREE.PerspectiveCamera(28, width / height, 0.01, 1000);
-    // Placeholder pose; we re-frame once the bounding box is known.
-    camera.position.set(0, 1.55, 1.05);
+    // Wider FOV so head + shoulders fit even when the model's max.y is
+    // a tall hair/hat node. Far plane bumped to handle giant scenes.
+    const camera = new THREE.PerspectiveCamera(35, width / height, 0.01, 1000);
+    camera.position.set(0, 1.55, 1.5);
     camera.lookAt(0, 1.55, 0);
 
-    // Soft three-point-ish lighting. PBR materials look dead without it.
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const key = new THREE.DirectionalLight(0xffffff, 0.9);
+    // Brighter base lighting so untextured fallback colors actually show.
+    scene.add(new THREE.AmbientLight(0xffffff, 0.95));
+    const key = new THREE.DirectionalLight(0xffffff, 1.1);
     key.position.set(1.2, 2, 1.5);
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0xfff0d1, 0.35);
+    const fill = new THREE.DirectionalLight(0xfff0d1, 0.45);
     fill.position.set(-1.5, 1.2, 1);
     scene.add(fill);
+
+    if (debug) {
+      // X = red, Y = green, Z = blue. 2-unit length so it's hard to miss.
+      scene.add(new THREE.AxesHelper(2));
+    }
 
     const loader = new GLTFLoader();
     let avatar: THREE.Object3D | null = null;
@@ -145,16 +158,27 @@ export function Avatar3D({
       );
       // Look at a point near the top of the bbox (head/shoulders).
       const targetY = box.max.y - size.y * 0.12;
-      // Pull the camera back proportional to model height so any size
-      // fits in frame.
-      const dist = Math.max(size.y * 0.55, 0.6);
+      // Pull the camera back a bit further than the model's height so
+      // even with the wider FOV the avatar always lands in-frame.
+      const dist = Math.max(size.y * 0.9, 1.0);
       camera.position.set(center.x, targetY, center.z + dist);
       camera.lookAt(center.x, targetY, center.z);
+      console.log(
+        "[Avatar3D] camera pos=",
+        [center.x, targetY, center.z + dist].map((v) => v.toFixed(2)).join(","),
+        "look=",
+        [center.x, targetY, center.z].map((v) => v.toFixed(2)).join(",")
+      );
+
+      let meshCount = 0;
 
       avatar.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
-        if (mesh.isMesh && (mesh as any).morphTargetDictionary) {
-          mouthMeshes.push(mesh);
+        if (mesh.isMesh) {
+          meshCount += 1;
+          if ((mesh as any).morphTargetDictionary) {
+            mouthMeshes.push(mesh);
+          }
         }
         // Accept any common naming used by Avatar SDK / RPM / Mixamo rigs.
         // We only assign once so we don't pick up "HeadTop_End" tip joints.
@@ -165,6 +189,14 @@ export function Avatar3D({
           }
         }
       });
+      console.log(
+        "[Avatar3D] meshes=",
+        meshCount,
+        "morphMeshes=",
+        mouthMeshes.length,
+        "head=",
+        headBone ? "ok" : "missing"
+      );
     }
 
     const clock = new THREE.Clock();
