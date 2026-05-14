@@ -15,7 +15,7 @@
     "expo-dev-client": "~6.0.21",
     "expo-file-system": "~19.0.16",
     "expo-gl": "~16.0.5",
-    "react-native-webview": "13.16.0",
+    "react-native-webview": "13.13.5",
     "expo-speech-recognition": "^3.1.3",
     "expo-status-bar": "~3.0.9",
     "expo-three": "^8.0.0",
