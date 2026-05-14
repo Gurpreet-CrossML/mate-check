@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
-import { FilamentAvatar } from "./FilamentAvatar";
+import { AvatarWebView } from "./AvatarWebView";
 import { streamChatReply, type ChatMessage } from "./api";
 import { useAvatarSpeech } from "./useAvatarSpeech";
 import { useSpeechToText } from "./useSpeechToText";
@@ -122,10 +122,6 @@ export function ChatScreen() {
     }
   }
 
-  function toggleMic() {
-    if (speech.isListening) speech.stop();
-    else speech.start();
-  }
 
   return (
     <SafeAreaView className="flex-1 bg-bg">
@@ -154,7 +150,7 @@ export function ChatScreen() {
         </View>
 
         <View className="mx-5 mb-3 aspect-square overflow-hidden rounded-3xl border border-brand/20 bg-surface">
-          <FilamentAvatar amplitudeRef={voice.amplitudeRef} />
+          <AvatarWebView amplitudeRef={voice.amplitudeRef} />
           {isBusy && stage === "thinking" ? (
             <View className="absolute right-3 top-3 flex-row items-center gap-2 rounded-full bg-bg/70 px-3 py-1">
               <ActivityIndicator size="small" color="#F5C518" />
@@ -199,15 +195,8 @@ export function ChatScreen() {
               editable={!isBusy}
               className="min-h-[44px] flex-1 py-3 text-base text-text"
             />
-            <Pressable
-              onPress={toggleMic}
-              disabled={isBusy}
-              className={`ml-2 h-10 w-10 items-center justify-center rounded-full ${
-                speech.isListening ? "bg-red-500" : "bg-brand/20"
-              }`}
-            >
-              <Text className="text-lg">{speech.isListening ? "■" : "🎙"}</Text>
-            </Pressable>
+            {/* Mic disabled in Expo Go (no expo-speech-recognition).
+                Restore when moving back to a custom dev client. */}
           </View>
 
           <Pressable
