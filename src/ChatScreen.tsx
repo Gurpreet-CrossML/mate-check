@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
-import { Avatar3D } from "./Avatar3D";
+import { AvatarWebView } from "./AvatarWebView";
 import { streamChatReply, type ChatMessage } from "./api";
 import { useAvatarSpeech } from "./useAvatarSpeech";
 import { useSpeechToText } from "./useSpeechToText";
@@ -154,7 +154,7 @@ export function ChatScreen() {
         </View>
 
         <View className="mx-5 mb-3 aspect-square overflow-hidden rounded-3xl border border-brand/20 bg-surface">
-          <Avatar3D amplitudeRef={voice.amplitudeRef} debug />
+          <AvatarWebView amplitudeRef={voice.amplitudeRef} />
           {isBusy && stage === "thinking" ? (
             <View className="absolute right-3 top-3 flex-row items-center gap-2 rounded-full bg-bg/70 px-3 py-1">
               <ActivityIndicator size="small" color="#F5C518" />
