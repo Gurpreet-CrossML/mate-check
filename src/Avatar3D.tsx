@@ -6,6 +6,8 @@ import { Asset } from "expo-asset";
 import * as THREE from "three";
 import { GLTFLoader } from "three-stdlib";
 
+import { stripGlbTextures } from "./glbStrip";
+
 // `require()` returns Metro's numeric asset id; expo-asset turns it into
 // a real local file path at runtime. Drop a replacement model.glb in
 // place and rebuild — no other code change needed.
@@ -85,14 +87,37 @@ export function Avatar3D({
     const loader = new GLTFLoader();
     let avatar: THREE.Object3D | null = null;
     try {
-      const buffer = await loadAvatarBuffer(avatarSource);
-      console.log("[Avatar3D] loaded", buffer.byteLength, "bytes; parsing");
+      const rawBuffer = await loadAvatarBuffer(avatarSource);
+      // RN's Blob constructor doesn't accept ArrayBuffer parts, so
+      // GLTFLoader's embedded-texture path fails (and spams the console).
+      // Strip the texture refs before parsing — materials fall back to
+      // their baseColorFactor, the avatar still renders cleanly.
+      const buffer = stripGlbTextures(rawBuffer);
+      console.log(
+        "[Avatar3D] loaded",
+        rawBuffer.byteLength,
+        "bytes (",
+        buffer.byteLength,
+        "after texture strip); parsing"
+      );
       const gltf = await new Promise<any>((resolve, reject) => {
         loader.parse(buffer, "", resolve, (err: any) => {
           reject(new Error(`GLTF parse failed: ${err?.message ?? String(err)}`));
         });
       });
       avatar = gltf.scene as THREE.Object3D;
+      // After stripping textures, most materials default to pure white
+      // (the glTF spec default when no baseColorFactor is present).
+      // Tint them by material name so head, teeth, clothes, etc. read
+      // as distinct surfaces instead of a uniform white blob.
+      avatar.traverse((obj) => {
+        const m = (obj as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+        if (!m || !("color" in m)) return;
+        const c = m.color;
+        const wasWhite = c.r > 0.95 && c.g > 0.95 && c.b > 0.95;
+        if (!wasWhite) return; // respect explicit baseColorFactor (e.g. eyelashes)
+        c.setHex(pickFallbackColor(m.name));
+      });
       console.log("[Avatar3D] avatar ready");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -201,6 +226,25 @@ function sanityCheckGlb(buffer: ArrayBuffer, where: string): void {
   if (head[0] !== 0x67 /* 'g' for "glTF" magic */) {
     throw new Error(`Not a GLB (first bytes: ${Array.from(head).join(",")}, src=${where})`);
   }
+}
+
+// Map material name → fallback RGB. Loose substring matches so the
+// same rules work across Avatar SDK / RPM / Meshy naming conventions.
+function pickFallbackColor(name: string): number {
+  const n = (name || "").toLowerCase();
+  if (n.includes("teeth")) return 0xf4ece0;
+  if (n.includes("eyeball") || n.includes("sclera")) return 0xfafafa;
+  if (n.includes("cornea")) return 0xffffff;
+  if (n.includes("eyelash") || n.includes("brow")) return 0x1a1a1a;
+  if (n.includes("hair") || n.includes("beard")) return 0x3a2b22;
+  if (n.includes("lip") || n.includes("mouth")) return 0xb56b6b;
+  if (n.includes("head") || n.includes("face") || n.includes("skin") || n.includes("body"))
+    return 0xcfa37a;
+  if (n.includes("hat") || n.includes("cap")) return 0x4a4a4a;
+  if (n.includes("outfit") || n.includes("shirt") || n.includes("cloth")) return 0x3a5a8a;
+  if (n.includes("shoe") || n.includes("boot")) return 0x2a2a2a;
+  if (n.includes("pants") || n.includes("trouser")) return 0x2c3a4a;
+  return 0xb5b5b5; // neutral light gray fallback
 }
 
 function clamp01(v: number): number {
