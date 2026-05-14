@@ -17,9 +17,11 @@
     "nativewind": "^4.2.3",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-filament": "^1.9.0",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
-    "react-native-worklets": "0.5.1"
+    "react-native-worklets": "0.5.1",
+    "react-native-worklets-core": "^1.6.0"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
