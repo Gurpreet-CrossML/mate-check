@@ -156,7 +156,14 @@ export function Avatar3D({
         if (mesh.isMesh && (mesh as any).morphTargetDictionary) {
           mouthMeshes.push(mesh);
         }
-        if (obj.name === "Head") headBone = obj;
+        // Accept any common naming used by Avatar SDK / RPM / Mixamo rigs.
+        // We only assign once so we don't pick up "HeadTop_End" tip joints.
+        if (!headBone) {
+          const lower = (obj.name || "").toLowerCase();
+          if (lower === "head" || lower === "avatarhead" || lower === "mixamorig:head") {
+            headBone = obj;
+          }
+        }
       });
     }
 
