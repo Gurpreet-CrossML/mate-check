@@ -22,11 +22,16 @@ import Animated, {
  * works first try on iOS Simulator.
  */
 
-const FRAME_CLOSED = require("../assets/avatar_mouth_0.png");
-const FRAME_SLIGHT = require("../assets/avatar_mouth_25.png");
-const FRAME_HALF = require("../assets/avatar_mouth_50.png");
-const FRAME_WIDE = require("../assets/avatar_mouth_75.png");
-const FRAME_BLINK = require("../assets/avatar_blink.png");
+// Placeholder: all five mouth states use the mascot until you render
+// real frames via scripts/render-frames.html. To enable real lip-sync,
+// drop the generated PNGs into assets/ and swap the right-hand side of
+// these lines for `require("../assets/avatar_mouth_0.png")` etc.
+const MASCOT = require("../assets/mascot.png");
+const FRAME_CLOSED = MASCOT;
+const FRAME_SLIGHT = MASCOT;
+const FRAME_HALF = MASCOT;
+const FRAME_WIDE = MASCOT;
+const FRAME_BLINK = MASCOT;
 
 type FrameSource = number; // result of require("./*.png")
 
