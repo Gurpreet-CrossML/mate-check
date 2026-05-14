@@ -109,7 +109,21 @@ export async function fetchTtsClip(text: string): Promise<TtsClip> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? `tts failed (${res.status})`);
-  return data as TtsClip;
+  // Read as text first so a non-JSON body (Vercel 500 page, nginx 502,
+  // proxy redirect) surfaces as a real error message instead of a
+  // confusing "Unexpected character: <" crash inside res.json().
+  const raw = await res.text();
+  let parsed: any = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    const snippet = raw.slice(0, 200).replace(/\s+/g, " ");
+    throw new Error(
+      `tts returned non-JSON (status ${res.status}): ${snippet || "<empty>"}`
+    );
+  }
+  if (!res.ok) {
+    throw new Error(parsed?.error ?? `tts failed (${res.status})`);
+  }
+  return parsed as TtsClip;
 }

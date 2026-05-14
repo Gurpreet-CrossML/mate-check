@@ -121,3 +121,34 @@ if (typeof g.self === "undefined") {
 if (typeof g.navigator === "undefined") {
   g.navigator = { userAgent: "ReactNative", platform: "ReactNative" };
 }
+
+// Filter known-harmless WebGL / expo-gl warnings that fire on every
+// frame and otherwise drown the dev console.
+//
+// - "EXGL: gl.pixelStorei() doesn't support this parameter yet!" —
+//   three.js sets UNPACK_COLORSPACE_CONVERSION_WEBGL etc. for image
+//   uploads we never do; the unsupported call is a no-op.
+// - "THREE.WebGLRenderer: EXT_color_buffer_float extension not supported"
+//   — informational feature-detect; we don't use float render targets.
+const NOISY_LOG_PATTERNS = [
+  "EXGL: gl.pixelStorei()",
+  "THREE.WebGLRenderer: EXT_color_buffer_float",
+];
+
+function isNoisy(args: unknown[]): boolean {
+  if (args.length === 0) return false;
+  const first = args[0];
+  if (typeof first !== "string") return false;
+  return NOISY_LOG_PATTERNS.some((p) => first.includes(p));
+}
+
+const origLog = console.log.bind(console);
+const origWarn = console.warn.bind(console);
+console.log = (...args: any[]) => {
+  if (isNoisy(args)) return;
+  origLog(...args);
+};
+console.warn = (...args: any[]) => {
+  if (isNoisy(args)) return;
+  origWarn(...args);
+};

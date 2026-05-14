@@ -69,9 +69,8 @@ export function Avatar3D({
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(backgroundColor);
 
-    const camera = new THREE.PerspectiveCamera(28, width / height, 0.1, 100);
-    // Framed on the head/shoulders — most full-body avatars are y-up,
-    // ~1.7m tall. Adjust if your model is differently scaled.
+    const camera = new THREE.PerspectiveCamera(28, width / height, 0.01, 1000);
+    // Placeholder pose; we re-frame once the bounding box is known.
     camera.position.set(0, 1.55, 1.05);
     camera.lookAt(0, 1.55, 0);
 
@@ -128,6 +127,30 @@ export function Avatar3D({
     let headBone: THREE.Object3D | null = null;
     if (avatar) {
       scene.add(avatar);
+
+      // Auto-frame the camera on the loaded avatar. Different exporters
+      // place the origin differently (RPM at feet, Meshy often at the
+      // chest, Avatar SDK sometimes at the head). Computing the actual
+      // bbox lets us frame head/shoulders regardless.
+      const box = new THREE.Box3().setFromObject(avatar);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+      console.log(
+        "[Avatar3D] bbox center=",
+        center.toArray().map((v) => v.toFixed(2)).join(","),
+        "size=",
+        size.toArray().map((v) => v.toFixed(2)).join(",")
+      );
+      // Look at a point near the top of the bbox (head/shoulders).
+      const targetY = box.max.y - size.y * 0.12;
+      // Pull the camera back proportional to model height so any size
+      // fits in frame.
+      const dist = Math.max(size.y * 0.55, 0.6);
+      camera.position.set(center.x, targetY, center.z + dist);
+      camera.lookAt(center.x, targetY, center.z);
+
       avatar.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         if (mesh.isMesh && (mesh as any).morphTargetDictionary) {
