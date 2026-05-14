@@ -1,6 +1,10 @@
-import { registerRootComponent } from 'expo';
+// MUST be the very first import — installs the DOM stubs that
+// three-stdlib touches at module-load time.
+import "./src/polyfills";
 
-import App from './App';
+import { registerRootComponent } from "expo";
+
+import App from "./App";
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,
