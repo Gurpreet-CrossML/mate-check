@@ -122,6 +122,11 @@ export function ChatScreen() {
     }
   }
 
+  function toggleMic() {
+    if (speech.isListening) speech.stop();
+    else speech.start();
+  }
+
 
   return (
     <SafeAreaView className="flex-1 bg-bg">
@@ -195,8 +200,15 @@ export function ChatScreen() {
               editable={!isBusy}
               className="min-h-[44px] flex-1 py-3 text-base text-text"
             />
-            {/* Mic disabled in Expo Go (no expo-speech-recognition).
-                Restore when moving back to a custom dev client. */}
+            <Pressable
+              onPress={toggleMic}
+              disabled={isBusy}
+              className={`ml-2 h-10 w-10 items-center justify-center rounded-full ${
+                speech.isListening ? "bg-red-500" : "bg-brand/20"
+              }`}
+            >
+              <Text className="text-lg">{speech.isListening ? "■" : "🎙"}</Text>
+            </Pressable>
           </View>
 
           <Pressable
