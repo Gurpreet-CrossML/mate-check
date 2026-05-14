@@ -1,7 +1,3 @@
-// MUST be the very first import — installs the DOM stubs that
-// three-stdlib touches at module-load time.
-import "./src/polyfills";
-
 import { registerRootComponent } from "expo";
 
 import App from "./App";

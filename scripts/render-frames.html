@@ -1,0 +1,234 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>MateCheck — Avatar Frame Renderer</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background: #0E1A14; color: #ECEFF1; margin: 0; padding: 20px; }
+  h1 { color: #F5C518; font-size: 18px; margin: 0 0 6px; }
+  p { font-size: 13px; color: #B2BEB5; margin: 4px 0 14px; line-height: 1.5; }
+  #drop { border: 2px dashed #F5C518; border-radius: 10px; padding: 22px; text-align: center; cursor: pointer; margin-bottom: 14px; }
+  #drop.over { background: rgba(245,197,24,0.1); }
+  #row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  canvas { width: 100%; background: #0E1A14; border-radius: 8px; display: block; }
+  .col { background: #182621; padding: 12px; border-radius: 10px; }
+  label { font-size: 12px; color: #B2BEB5; }
+  button { background: #F5C518; color: #0E1A14; border: 0; padding: 10px 14px; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 14px; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #log { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #90A097; margin-top: 10px; white-space: pre-wrap; max-height: 140px; overflow: auto; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: #F5C518; font-size: 12px; }
+  .controls { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  input[type=range] { flex: 1; }
+</style>
+</head>
+<body>
+
+<h1>MateCheck — Avatar Frame Renderer</h1>
+<p>
+  Drop your <code>model.glb</code> below. The page will render it at four
+  <code>jawOpen</code> values plus a blink frame and save them as PNGs
+  next to where your browser drops downloads. Move those PNGs into
+  <code>mate-check/assets/</code>.
+</p>
+
+<div id="drop">
+  <strong>Click or drag <code>model.glb</code> here</strong><br>
+  <input id="file" type="file" accept=".glb" style="display:none">
+</div>
+
+<div id="row">
+  <div class="col">
+    <label>Preview</label>
+    <canvas id="preview" width="512" height="512"></canvas>
+    <div class="controls">
+      <label style="white-space:nowrap">jawOpen</label>
+      <input id="jaw" type="range" min="0" max="1" step="0.01" value="0">
+      <span id="jawval">0.00</span>
+    </div>
+    <div class="controls">
+      <label><input id="blink" type="checkbox"> blink</label>
+    </div>
+  </div>
+  <div class="col">
+    <label>Export</label>
+    <p style="margin:6px 0 10px;">Renders 4 mouth states + 1 blink frame at 1024×1024 PNG with transparent background.</p>
+    <button id="export" disabled>Export all 5 frames</button>
+    <details>
+      <summary>Frame configuration</summary>
+      <pre style="font-size:11px;color:#90A097;margin-top:6px;">
+avatar_mouth_0.png   jawOpen=0.00
+avatar_mouth_25.png  jawOpen=0.25
+avatar_mouth_50.png  jawOpen=0.50
+avatar_mouth_75.png  jawOpen=0.80
+avatar_blink.png     jawOpen=0.00, eyeBlinkLeft/Right=1
+      </pre>
+    </details>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const SIZE = 1024;          // export resolution
+const PREVIEW = 512;        // visible canvas size
+
+const log = (msg) => {
+  const el = document.getElementById('log');
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+};
+
+// Two renderers: one feeds the on-screen preview canvas, one renders
+// at full SIZE for export. We re-use a single off-screen canvas.
+const previewCanvas = document.getElementById('preview');
+const previewRenderer = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: true, alpha: true });
+previewRenderer.setSize(PREVIEW, PREVIEW, false);
+previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+previewRenderer.setClearColor(0x000000, 0);
+
+const exportCanvas = document.createElement('canvas');
+exportCanvas.width = SIZE;
+exportCanvas.height = SIZE;
+const exportRenderer = new THREE.WebGLRenderer({ canvas: exportCanvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+exportRenderer.setSize(SIZE, SIZE, false);
+exportRenderer.outputColorSpace = THREE.SRGBColorSpace;
+exportRenderer.setClearColor(0x000000, 0);
+
+const scene = new THREE.Scene();
+scene.add(new THREE.AmbientLight(0xffffff, 0.95));
+const key = new THREE.DirectionalLight(0xffffff, 1.0);
+key.position.set(1.2, 2, 1.5); scene.add(key);
+const fill = new THREE.DirectionalLight(0xfff0d1, 0.4);
+fill.position.set(-1.5, 1.2, 1); scene.add(fill);
+
+const camera = new THREE.PerspectiveCamera(28, 1, 0.01, 1000);
+
+let avatar = null;
+const morphMeshes = [];
+
+function frameCamera() {
+  const box = new THREE.Box3().setFromObject(avatar);
+  const size = new THREE.Vector3(); const center = new THREE.Vector3();
+  box.getSize(size); box.getCenter(center);
+  // Tighter head-and-shoulders framing — distance ~ 0.6 × height.
+  const targetY = box.max.y - size.y * 0.12;
+  const dist = Math.max(size.y * 0.6, 0.8);
+  camera.position.set(center.x, targetY, center.z + dist);
+  camera.lookAt(center.x, targetY, center.z);
+}
+
+function applyMorphs(jawOpen, blink) {
+  for (const m of morphMeshes) {
+    const dict = m.morphTargetDictionary;
+    const inf  = m.morphTargetInfluences;
+    if (!dict || !inf) continue;
+    const set = (n, v) => { const i = dict[n]; if (i !== undefined) inf[i] = v; };
+    set('jawOpen', jawOpen);
+    set('mouthFunnel', jawOpen * 0.25);
+    set('eyeBlinkLeft', blink ? 1 : 0);
+    set('eyeBlinkRight', blink ? 1 : 0);
+  }
+}
+
+function renderPreview() {
+  if (!avatar) return;
+  const jaw = parseFloat(document.getElementById('jaw').value);
+  const blink = document.getElementById('blink').checked;
+  document.getElementById('jawval').textContent = jaw.toFixed(2);
+  applyMorphs(jaw, blink);
+  previewRenderer.render(scene, camera);
+}
+
+function renderToPng(jawOpen, blink) {
+  applyMorphs(jawOpen, blink);
+  exportRenderer.render(scene, camera);
+  return new Promise((resolve) => {
+    exportCanvas.toBlob((b) => resolve(b), 'image/png');
+  });
+}
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function loadGlb(buffer) {
+  log('Parsing GLB (' + buffer.byteLength.toLocaleString() + ' bytes)…');
+  const loader = new GLTFLoader();
+  const gltf = await new Promise((res, rej) => loader.parse(buffer, '', res, rej));
+  if (avatar) scene.remove(avatar);
+  avatar = gltf.scene;
+  scene.add(avatar);
+  morphMeshes.length = 0;
+  avatar.traverse((o) => {
+    if (o.isMesh && o.morphTargetDictionary) morphMeshes.push(o);
+  });
+  frameCamera();
+  document.getElementById('export').disabled = false;
+  log('Loaded. Meshes with morphs: ' + morphMeshes.length + '.');
+  renderPreview();
+  // Drive the preview while idle.
+  function loop() {
+    renderPreview();
+    requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// Wire UI.
+const drop = document.getElementById('drop');
+const fileIn = document.getElementById('file');
+drop.addEventListener('click', () => fileIn.click());
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', async (e) => {
+  e.preventDefault(); drop.classList.remove('over');
+  const file = e.dataTransfer.files[0];
+  if (file) await handleFile(file);
+});
+fileIn.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (file) await handleFile(file);
+});
+async function handleFile(file) {
+  const buf = await file.arrayBuffer();
+  await loadGlb(buf);
+}
+
+document.getElementById('jaw').addEventListener('input', renderPreview);
+document.getElementById('blink').addEventListener('change', renderPreview);
+
+document.getElementById('export').addEventListener('click', async () => {
+  const variants = [
+    { name: 'avatar_mouth_0.png',  jaw: 0.0, blink: false },
+    { name: 'avatar_mouth_25.png', jaw: 0.25, blink: false },
+    { name: 'avatar_mouth_50.png', jaw: 0.5, blink: false },
+    { name: 'avatar_mouth_75.png', jaw: 0.8, blink: false },
+    { name: 'avatar_blink.png',    jaw: 0.0, blink: true  },
+  ];
+  for (const v of variants) {
+    log('Rendering ' + v.name + '…');
+    const blob = await renderToPng(v.jaw, v.blink);
+    downloadBlob(blob, v.name);
+  }
+  log('Done. Move the 5 PNGs into mate-check/assets/.');
+});
+</script>
+</body>
+</html>
